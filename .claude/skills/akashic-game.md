@@ -770,7 +770,7 @@ akashic uninstall <パッケージ名>   # アンインストール
 | ライブラリ | 用途 |
 |-----------|------|
 | `@akashic-extension/akashic-timeline` | トゥイーンアニメーション |
-| `@akashic-extension/akashic-box2d` | 2D物理演算 |
+| `@akashic-extension/akashic-box2d` | 2D物理演算（アングリーバード、ピンボール、物理パズル等） |
 | `@akashic-extension/akashic-label` | 高機能テキスト表示 |
 | `@akashic-extension/collision-js` | 高度な当たり判定 |
 | `@akashic-extension/resolve-player-info` | プレイヤー名取得 |
@@ -779,6 +779,26 @@ akashic uninstall <パッケージ名>   # アンインストール
 - Node.jsコアモジュール（`fs`, `http`等）を使わない
 - `Math.random()` を使わない
 - DOM APIを使わない
+
+### Box2D 物理演算を使う場合
+
+物理演算が必要なゲーム（アングリーバード風、ピンボール、物理パズル、倒壊系など）を作る場合は、**必ず `references/box2d-physics.md` を読むこと**。以下の致命的な落とし穴がある:
+
+1. **`b2BodyDef` / `b2FixtureDef` は `new` が必須** — `new` なしだと `Cannot set properties of undefined` エラー
+2. **インパルス/力に `box2d.vec2()` を使うと値が1/50になる** — `new b2Vec2()` を直接使うこと
+3. **`step()` 中に `removeBody()` するとクラッシュ** — 削除キューパターンを使うこと
+4. **衝突の連続検出でブロックが一瞬で壊れる** — クールダウンシステムが必要
+
+### `require()` の型定義
+
+`@akashic-extension/*` パッケージを `require()` で読み込む場合、テンプレートに `typings/require.d.ts` が存在しないとコンパイルエラー（TS2591）になる。
+
+```typescript
+// typings/require.d.ts を作成
+declare function require(moduleName: string): any;
+```
+
+`tsconfig.json` の `include` に `"typings/require.d.ts"` を追加すること。
 
 ---
 
@@ -881,6 +901,25 @@ export function main(param: GameMainParameterObject): void {
 9. **zipサイズ30MB以下、画面サイズ1280x720以下**
 10. **TypeScript: `for...of`、`Array.every/find/some` は使えない**（`lib: ["es5"]`の制約）
 11. **`akashic init` は既存ファイルと競合する** → サブディレクトリで実行する
+12. **`require()` でコンパイルエラーが出たら** → `typings/require.d.ts` を作成し tsconfig.json に追加
+13. **Box2D使用時は `references/box2d-physics.md` を必ず参照** — 致命的な落とし穴が複数ある
+
+---
+
+## 演出・ゲームジュース
+
+画像アセットなしでもリッチなゲーム体験を作るための演出パターンを `references/visual-effects.md` にまとめている。
+以下の演出が必要な場合に参照すること:
+
+- **パーティクルシステム**: 破壊・爆発・着弾の破片エフェクト
+- **画面シェイク**: worldContainerを揺らし、UIレイヤーは揺らさない構成
+- **衝撃波リング**: 拡大＋フェードアウトする矩形で疑似リング
+- **軌跡エフェクト**: 飛行物体の残像
+- **土煙**: 地面付近の着弾で扇状に広がるパーティクル
+- **スコアポップアップ**: 浮き上がって消えるラベル
+- **ヒビ・ダメージ色変化**: ブロックのHP視覚フィードバック
+
+**ポイント**: 演出は重ねるほど効果的。発射時なら「放射状パーティクル + 衝撃波 + 画面シェイク + SE」を同時に発火させる。
 
 ---
 
