@@ -50,18 +50,32 @@ declare function require(moduleName: string): any;
 
 ## 2. 初期化
 
+**⚠️ `require()` は必ず `export function main()` の中で呼ぶこと。**
+トップレベルに書くと `module.exports` と混同され、`_bootstrap.ts` の `import { main }` と非互換になる。
+
 ```typescript
-var b2Mod = require("@akashic-extension/akashic-box2d");
+import { GameMainParameterObject } from "./parameterObject";
 
-// Box2Dワールド生成
-var box2d = new b2Mod.Box2D({
-  gravity: [0, 9.8],  // 下方向の重力
-  scale: 50,           // ピクセル→メートル変換係数（SCALE）
-  sleep: true          // 静止したボディをスリープさせる（パフォーマンス向上）
-});
+export function main(param: GameMainParameterObject): void {
+  // ✅ require は main() の中で呼ぶ
+  var b2Mod = require("@akashic-extension/akashic-box2d");
 
-// Box2DWeb の内部モジュールへのアクセス（b2BodyDef等に必要）
-var b2Web = b2Mod.Box2DWeb;
+  var scene = new g.Scene({ game: g.game });
+  scene.onLoad.add(function () {
+    // Box2Dワールド生成
+    var box2d = new b2Mod.Box2D({
+      gravity: [0, 9.8],  // 下方向の重力
+      scale: 50,           // ピクセル→メートル変換係数（SCALE）
+      sleep: true          // 静止したボディをスリープさせる（パフォーマンス向上）
+    });
+
+    // Box2DWeb の内部モジュールへのアクセス（b2BodyDef等に必要）
+    var b2Web = b2Mod.Box2DWeb;
+
+    // ... ゲームロジック ...
+  });
+  g.game.pushScene(scene);
+}
 ```
 
 `scale` は「何ピクセルが1メートルか」を表す。SCALE=50 なら 50px = 1m。

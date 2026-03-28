@@ -102,28 +102,33 @@ const map = new Map<string, number>();
 ```
 
 ### 代替パターン（必ずこちらを使う）
+
+**⚠️ すべてのコードで `var` と `function()` を使うこと。`let`/`const`/アロー関数 `=>` は使わない。**
+これらはコンパイルは通ることがあるが、Akashic Engine の実行環境（ES5）では動作しない場合がある。
+統一して `var` + `function()` で書くことで、環境差異による不具合を防ぐ。
+
 ```typescript
-// ✅ 通常のforループ
-for (let i = 0; i < items.length; i++) {
-  const item = items[i];
+// ✅ 通常のforループ（varを使う）
+for (var i = 0; i < items.length; i++) {
+  var item = items[i];
   // ...
 }
 
 // ✅ 全要素チェック（everyの代替）
-let allDone = true;
-for (let i = 0; i < items.length; i++) {
+var allDone = true;
+for (var i = 0; i < items.length; i++) {
   if (!items[i].done) { allDone = false; break; }
 }
 
 // ✅ 要素検索（findの代替）
-let found: Item | null = null;
-for (let i = 0; i < items.length; i++) {
+var found: any = null;
+for (var i = 0; i < items.length; i++) {
   if (items[i].id === targetId) { found = items[i]; break; }
 }
 
-// ✅ filter/mapはES5なので使用可能
-const activeItems = items.filter(item => item.active);
-const names = items.map(item => item.name);
+// ✅ filter/mapはES5なので使用可能（ただしアロー関数ではなくfunction）
+var activeItems = items.filter(function(item: any) { return item.active; });
+var names = items.map(function(item: any) { return item.name; });
 ```
 
 ### テンプレートの型定義
@@ -864,48 +869,50 @@ akashic export zip --nicolive --output game.zip
 
 ## 20. ランキングゲームの基本テンプレート (TypeScript)
 
+**⚠️ このテンプレートはすべて `var` と `function()` で書かれている。`let`/`const`/`=>` は使わないこと。**
+
 ```typescript
 import { GameMainParameterObject } from "./parameterObject";
 
 export function main(param: GameMainParameterObject): void {
-  const scene = new g.Scene({
+  var scene = new g.Scene({
     game: g.game,
     assetIds: ["se"]  // 使用するアセットのみ列挙
   });
 
-  let time = 60;
+  var time = 60;
   if (param.sessionParameter.totalTimeLimit) {
     time = param.sessionParameter.totalTimeLimit;
   }
   g.game.vars.gameState = { score: 0 };
 
-  scene.onLoad.add(() => {
-    const seAudioAsset = scene.asset.getAudioById("se");
+  scene.onLoad.add(function () {
+    var seAudioAsset = scene.asset.getAudioById("se");
 
-    const font = new g.DynamicFont({
+    var font = new g.DynamicFont({
       game: g.game,
       fontFamily: "sans-serif",
       size: 48
     });
 
-    const scoreLabel = new g.Label({
-      scene, font, text: "SCORE: 0",
+    var scoreLabel = new g.Label({
+      scene: scene, font: font, text: "SCORE: 0",
       fontSize: 28, textColor: "white",
       x: 20, y: 10
     });
     scene.append(scoreLabel);
 
-    const timeLabel = new g.Label({
-      scene, font, text: "TIME: " + Math.ceil(time),
+    var timeLabel = new g.Label({
+      scene: scene, font: font, text: "TIME: " + Math.ceil(time),
       fontSize: 28, textColor: "white",
       x: g.game.width - 200, y: 10
     });
     scene.append(timeLabel);
 
-    let gameOver = false;
+    var gameOver = false;
 
     // ゲームロジック
-    scene.onPointDownCapture.add(() => {
+    scene.onPointDownCapture.add(function () {
       if (gameOver) return;
       g.game.vars.gameState.score += 10;
       scoreLabel.text = "SCORE: " + g.game.vars.gameState.score;
@@ -914,7 +921,7 @@ export function main(param: GameMainParameterObject): void {
     });
 
     // メインループ
-    scene.onUpdate.add(() => {
+    scene.onUpdate.add(function () {
       if (gameOver) return;
       time -= 1 / g.game.fps;
       if (time <= 0) {
@@ -927,6 +934,27 @@ export function main(param: GameMainParameterObject): void {
   });
 
   g.game.pushScene(scene);
+}
+```
+
+### ⚠️ main関数のエクスポート形式
+
+テンプレートの `_bootstrap.ts` は `import { main } from "./main"` でメイン関数を読み込む。
+そのため **必ず `export function main()` を使うこと**。`module.exports = main` は使わない:
+
+```typescript
+// ✅ 正しい: named export（テンプレートの _bootstrap.ts と互換）
+export function main(param: GameMainParameterObject): void { ... }
+
+// ❌ 間違い: module.exports（_bootstrap.tsのimportと非互換でTS2306エラー）
+// module.exports = main;
+```
+
+`require()` で外部パッケージを読み込む場合は `export function main()` の中で使う:
+```typescript
+export function main(param: GameMainParameterObject): void {
+  var b2 = require("@akashic-extension/akashic-box2d");
+  // ... b2 を使ったコード
 }
 ```
 
@@ -943,11 +971,14 @@ export function main(param: GameMainParameterObject): void {
 7. **音声は .ogg + .m4a の2形式を用意する**
 8. **制限時間の10秒前には結果表示を完了させる**
 9. **zipサイズ30MB以下、画面サイズ1280x720以下**
-10. **TypeScript: `for...of`、`Array.every/find/some` は使えない**（`lib: ["es5"]`の制約）
+10. **TypeScript: `var` と `function()` だけを使う** — `let`/`const`/`=>`/`for...of`/`.every()`/`.find()` は使わない（`lib: ["es5"]`の制約。セクション3参照）
 11. **`akashic init` は既存ファイルと競合する** → サブディレクトリで実行する
 12. **`require()` でコンパイルエラーが出たら** → `typings/require.d.ts` を作成し tsconfig.json に追加
 13. **Box2D使用時は `references/box2d-physics.md` を必ず参照** — 致命的な落とし穴が複数ある
 14. **キーボードプラグインは `game.json` に登録しない** — コードで `register()` + `onStateChange` で `start()` すること
+15. **大量エンティティは逆順ループで削除** — `for (i = arr.length - 1; i >= 0; i--)` + `splice(i, 1)`、上限 `MAX` も設ける
+16. **`module.exports` は使わない** — テンプレートの `_bootstrap.ts` は `import { main } from "./main"` でnamed importする。`module.exports = main` だとTS2306エラーになる。必ず `export function main()` を使う
+17. **`require()` は `export function main()` の中で呼ぶ** — トップレベルで `var b2 = require(...)` と書くと、`export function main()` と共存できずモジュール解決エラーになる場合がある
 
 ---
 
@@ -965,6 +996,21 @@ export function main(param: GameMainParameterObject): void {
 - **ヒビ・ダメージ色変化**: ブロックのHP視覚フィードバック
 
 **ポイント**: 演出は重ねるほど効果的。発射時なら「放射状パーティクル + 衝撃波 + 画面シェイク + SE」を同時に発火させる。
+
+---
+
+## ゲームアーキテクチャパターン
+
+弾幕STG、アクション、大量エンティティを扱うゲームの設計パターンを `references/game-patterns.md` にまとめている。
+以下のパターンが必要な場合に参照すること:
+
+- **レイヤー構成**: bgLayer → bulletLayer → entityLayer → shotLayer → fxLayer → uiLayer の描画順序
+- **エンティティ管理**: `dead` フラグ + 逆順ループ `splice` + `MAX_BULLETS` 上限
+- **弾幕パターン**: 全方位弾、自機狙い、渦巻き、ランダム散弾、扇形弾
+- **当たり判定の分離**: 見た目サイズ（24px）と判定サイズ（4px）を別にして弾幕ゲーの爽快感を出す
+- **コンボシステム**: 連続撃破でスコア倍率アップ
+- **難易度スケーリング**: 時間経過で弾速・弾数・敵HP・出現間隔を変動
+- **自動ショット**: プレイヤーが避けることに集中できる設計
 
 ---
 
