@@ -771,6 +771,7 @@ akashic uninstall <パッケージ名>   # アンインストール
 |-----------|------|
 | `@akashic-extension/akashic-timeline` | トゥイーンアニメーション |
 | `@akashic-extension/akashic-box2d` | 2D物理演算（アングリーバード、ピンボール、物理パズル等） |
+| `@akashic-extension/akashic-keyboard-plugin` | キーボード入力（テトリス、アクション等） |
 | `@akashic-extension/akashic-label` | 高機能テキスト表示 |
 | `@akashic-extension/collision-js` | 高度な当たり判定 |
 | `@akashic-extension/resolve-player-info` | プレイヤー名取得 |
@@ -788,6 +789,49 @@ akashic uninstall <パッケージ名>   # アンインストール
 2. **インパルス/力に `box2d.vec2()` を使うと値が1/50になる** — `new b2Vec2()` を直接使うこと
 3. **`step()` 中に `removeBody()` するとクラッシュ** — 削除キューパターンを使うこと
 4. **衝突の連続検出でブロックが一瞬で壊れる** — クールダウンシステムが必要
+
+### キーボード入力を使う場合
+
+テトリスやアクションゲームなどキーボード操作が必要なゲームでは `@akashic-extension/akashic-keyboard-plugin` を使う。
+
+**⚠️ `game.json` の `operationPlugins` には登録しない** — モジュールのエクスポート形式が合わず `isSupported` エラーになる。必ずコードで登録すること。
+
+```typescript
+// main関数内、scene.onLoad の外で登録
+var kbMod = require("@akashic-extension/akashic-keyboard-plugin");
+g.game.operationPluginManager.register(kbMod.KeyboardOperationPlugin, 1);
+
+// シーンがアクティブになったら開始
+scene.onStateChange.add(function(state) {
+  if (state === "active") {
+    g.game.operationPluginManager.start(1);
+  } else if (state === "deactive") {
+    g.game.operationPluginManager.stop(1);
+  }
+});
+
+// scene.onLoad 内でキーイベントを受け取る
+scene.onOperation.add(function(ev) {
+  if (ev.code !== 1) return;  // キーボードプラグインの識別コード
+  if (!ev.data) return;
+  var data = ev.data as any;
+  if (data.type !== "keydown") return;  // "keydown" または "keyup"
+
+  var key = data.key as string;  // KeyboardEvent.key の値
+  if (key === "ArrowLeft") { /* 左移動 */ }
+  else if (key === "ArrowRight") { /* 右移動 */ }
+  else if (key === "ArrowUp") { /* 回転等 */ }
+  else if (key === "ArrowDown") { /* 下移動 */ }
+  else if (key === " ") { /* スペースキー */ }
+  // data.code も使える（"KeyA", "Space" 等の物理キー名）
+});
+```
+
+**重要なポイント:**
+- `ev.data` はオブジェクト（`{type, key, code, shiftKey, altKey, ctrlKey, metaKey}`）で、配列ではない
+- `ev.code` はプラグインの識別コード（ここでは `1`）。`data.code` はキーボードの物理キー名
+- `data.key` は `KeyboardEvent.key` の値（`"ArrowLeft"`, `"a"`, `" "` など）
+- `data.code` は `KeyboardEvent.code` の値（`"ArrowLeft"`, `"KeyA"`, `"Space"` など）
 
 ### `require()` の型定義
 
@@ -903,6 +947,7 @@ export function main(param: GameMainParameterObject): void {
 11. **`akashic init` は既存ファイルと競合する** → サブディレクトリで実行する
 12. **`require()` でコンパイルエラーが出たら** → `typings/require.d.ts` を作成し tsconfig.json に追加
 13. **Box2D使用時は `references/box2d-physics.md` を必ず参照** — 致命的な落とし穴が複数ある
+14. **キーボードプラグインは `game.json` に登録しない** — コードで `register()` + `onStateChange` で `start()` すること
 
 ---
 
