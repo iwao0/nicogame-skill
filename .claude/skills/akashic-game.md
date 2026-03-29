@@ -1,5 +1,5 @@
 ---
-description: "Akashic Engineを使ったニコ生ゲーム（ニコニコ新市場）の開発を支援するスキル。ランキングゲーム、マルチプレイゲームの作成、TypeScript/JavaScript対応、game.json設定、エンティティ操作、シーン管理、音声、アニメーション、当たり判定、マルチプレイ同期など。ユーザーが「ゲームを作りたい」「Akashic」「ニコ生ゲーム」「ニコニコ」「ランキングゲーム」「ブロック崩し」「シューティング」などゲーム開発に関するリクエストをした場合、画像アセットなしで素早くプロトタイプする場合にもこのスキルを使用すること。"
+description: "Akashic Engineを使ったニコ生ゲーム（ニコニコ新市場）の開発を支援するスキル。ランキングゲーム、マルチプレイゲームの作成、TypeScript/JavaScript対応、game.json設定、エンティティ操作、シーン管理、音声、アニメーション、当たり判定、マルチプレイ同期、3Dゲーム開発（akashic-three/Three.js）など。ユーザーが「ゲームを作りたい」「Akashic」「ニコ生ゲーム」「ニコニコ」「ランキングゲーム」「ブロック崩し」「シューティング」「3Dゲーム」「パターゴルフ」「Three.js」などゲーム開発に関するリクエストをした場合、画像アセットなしで素早くプロトタイプする場合にもこのスキルを使用すること。"
 user_invocable: true
 ---
 
@@ -851,7 +851,183 @@ declare function require(moduleName: string): any;
 
 ---
 
-## 19. ゲームの公開
+## 19. sandbox.config.js（開発時の警告制御）
+
+`akashic-sandbox` の実行時警告は `sandbox.config.js` で制御できる。プロジェクトルートに配置する。
+
+```javascript
+module.exports = {
+  "warn": {
+    "es6": false,           // ES6オブジェクト使用の警告を無効化
+    "useMathRandom": false, // Math.random()使用の警告を無効化
+    "useDate": false,       // Dateオブジェクト使用の警告を無効化
+    "drawOutOfCanvas": false,         // 描画範囲外の警告を無効化
+    "drawDestinationEmpty": false,    // 空描画先の警告を無効化
+    "createNonIntegerSurface": false  // 非整数サーフェスの警告を無効化
+  }
+};
+```
+
+**よくある使い方:**
+- Three.js等の外部ライブラリが内部で `Math.random()` を呼ぶ場合 → `"useMathRandom": false`
+- ES2020の `lib` を使うプロジェクト（akashic-three等）→ `"es6": false`
+- 全項目のデフォルトは `true`（警告ON）。必要なものだけ `false` にする
+
+---
+
+## 20. @iwao0/akashic-three（3Dゲーム開発）
+
+`@iwao0/akashic-three` はThree.jsをAkashic Engine上で使うためのラッパーライブラリ。3Dゲームの開発が可能になる。
+
+### セットアップ
+
+```bash
+cd my-game
+npm install @iwao0/akashic-three
+```
+
+### 必須の設定変更
+
+**1. game.json — `renderers` を `"webgl"` に設定:**
+```json
+{
+  "renderers": "webgl"
+}
+```
+
+**2. tsconfig.json — `lib` を `ES2020` + `DOM` に、`GPUTexture.d.ts` を追加:**
+```json
+{
+  "compilerOptions": {
+    "lib": ["ES2020", "DOM"],
+    "target": "ES6"
+  },
+  "files": [
+    "node_modules/@akashic/akashic-engine/index.runtime.d.ts",
+    "node_modules/@iwao0/akashic-three/GPUTexture.d.ts"
+  ]
+}
+```
+
+**⚠️ akashic-three使用時はES5制約が適用されない。** `let`/`const`/アロー関数/`for...of` 等を自由に使ってよい。`lib: ["ES2020", "DOM"]` が必要なため、通常のES5テンプレートとは異なる。
+
+**3. sandbox.config.js — 警告を抑制:**
+```javascript
+module.exports = {
+  "warn": {
+    "es6": false,
+    "useMathRandom": false
+  }
+};
+```
+
+Three.jsは内部で `Math.random()` を使うため、`useMathRandom: false` が必要。
+
+### 基本的な使い方
+
+```typescript
+import * as THREE from "three";
+import { Sprite3D } from "@iwao0/akashic-three";
+import { GameMainParameterObject } from "./parameterObject";
+
+export function main(param: GameMainParameterObject): void {
+  const scene = new g.Scene({
+    game: g.game,
+    assetIds: ["se"],
+    assetPaths: [
+      ...Sprite3D.getAssetPaths()
+    ]
+  });
+
+  scene.onLoad.add(() => {
+    const GW = g.game.width;
+    const GH = g.game.height;
+
+    const sprite3d = new Sprite3D({
+      scene: scene,
+      width: GW,
+      height: GH
+    });
+
+    // WebGL非対応環境のフォールバック
+    if (!sprite3d.isSupported) {
+      const image = sprite3d.getWarningImage();
+      const warning = new g.Sprite({
+        scene: scene,
+        src: image,
+        x: GW / 2,
+        y: GH - 60,
+        anchorX: 0.5,
+        anchorY: 1
+      });
+      scene.append(warning);
+      return;
+    }
+
+    scene.append(sprite3d);
+
+    // Three.jsのレンダラーを取得
+    const renderer = sprite3d.renderer as THREE.WebGLRenderer;
+    const scene3d = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, GW / GH, 0.1, 200);
+
+    // メインループで描画
+    scene.onUpdate.add(() => {
+      renderer.render(scene3d, camera);
+    });
+  });
+
+  g.game.pushScene(scene);
+}
+```
+
+### 3Dゲームでのカメラ制御パターン
+
+カメラが対象をリアルタイムに追従すると不自然になる。lerp（線形補間）で滑らかに追従させるのが効果的:
+
+```typescript
+// カメラの現在位置を保持
+let camX = 0, camZ = 0;
+
+function updateCamera(lerpSpeed: number): void {
+  // 目標位置を計算
+  const goalX = targetX - dirX * 6;
+  const goalZ = targetZ - dirZ * 6;
+
+  // 補間で滑らかに追従（距離が大きいほど速く追従）
+  const dx = goalX - camX;
+  const dz = goalZ - camZ;
+  const dist = Math.sqrt(dx * dx + dz * dz);
+  const lerp = Math.min(1, lerpSpeed + dist * 0.01);
+
+  camX += dx * lerp;
+  camZ += dz * lerp;
+
+  camera.position.set(camX, 6, camZ);
+  camera.lookAt(targetX, 0, targetZ);
+}
+
+// 使い分け:
+// - ボール転がり中: updateCamera(0.03)  ← ゆっくり追従
+// - 停止後（操作待ち）: updateCamera(0.15) ← 素早く追いつく
+// - ホール切り替え: camX = goalX; camZ = goalZ; ← 即座に配置
+```
+
+### 2DのUI要素との共存
+
+3D描画は `Sprite3D` エンティティ上で行われる。Akashicの2Dエンティティ（`g.Label`、`g.FilledRect` 等）は `Sprite3D` の上に重ねて配置できるため、スコアやタイマー等のUIは通常の2Dエンティティで作る:
+
+```typescript
+scene.append(sprite3d);  // 3D描画レイヤー
+
+// UIは3Dの上に重ねる
+const scoreLabel = new g.Label({ scene, font, text: "SCORE: 0", ... });
+scene.append(scoreLabel);
+```
+
+---
+
+## 21. ゲームの公開
 
 ### HTML5出力
 ```bash
@@ -867,7 +1043,7 @@ akashic export zip --nicolive --output game.zip
 
 ---
 
-## 20. ランキングゲームの基本テンプレート (TypeScript)
+## 22. ランキングゲームの基本テンプレート (TypeScript)
 
 **⚠️ このテンプレートはすべて `var` と `function()` で書かれている。`let`/`const`/`=>` は使わないこと。**
 
@@ -979,6 +1155,9 @@ export function main(param: GameMainParameterObject): void {
 15. **大量エンティティは逆順ループで削除** — `for (i = arr.length - 1; i >= 0; i--)` + `splice(i, 1)`、上限 `MAX` も設ける
 16. **`module.exports` は使わない** — テンプレートの `_bootstrap.ts` は `import { main } from "./main"` でnamed importする。`module.exports = main` だとTS2306エラーになる。必ず `export function main()` を使う
 17. **`require()` は `export function main()` の中で呼ぶ** — トップレベルで `var b2 = require(...)` と書くと、`export function main()` と共存できずモジュール解決エラーになる場合がある
+18. **外部ライブラリが `Math.random()` を使う場合** → `sandbox.config.js` で `"useMathRandom": false` を設定する（セクション19参照）
+19. **akashic-three使用時はES5制約は適用外** — `lib: ["ES2020", "DOM"]`、`"renderers": "webgl"`、`GPUTexture.d.ts` の設定が必要（セクション20参照）
+20. **3Dゲームのカメラは即座追従しない** — lerp（線形補間）でゆっくり追従させ、操作待ちに戻ったら速く追いつかせる
 
 ---
 
