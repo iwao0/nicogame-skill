@@ -78,6 +78,30 @@ akashic serve                           # http://localhost:3300/
 akashic serve --target-service nicolive  # ニコ生環境シミュレート（放送者判別テスト可能）
 ```
 
+### サンドボックスのブラウザ自動起動を抑制
+
+`akashic sandbox` は内部で `akashic-cli-serve` を使っており、デフォルトでPCのブラウザが自動で開く。Claude Previewなど別のブラウザで確認する場合、PCブラウザは不要なので `-B`（`--no-open-browser`）オプションで抑制できる:
+
+```bash
+akashic sandbox -B /path/to/game        # ブラウザを開かずにサーバー起動
+akashic sandbox -B -p 3000 /path/to/game # ポート指定と組み合わせ
+```
+
+`.claude/launch.json` での設定例:
+```json
+{
+  "runtimeExecutable": "npx",
+  "runtimeArgs": ["akashic", "sandbox", "-B", "/path/to/game"],
+  "port": 3000
+}
+```
+
+### Fit to screen（画面サイズ合わせ）
+
+`akashic sandbox` にはゲーム画面をウインドウに合わせて表示する「Fit to screen」をCLIから設定するオプションがない。毎回手動で画面右上の **Display Options → Fit to screen** チェックボックスをONにする必要がある。
+
+Claude Previewで操作する場合は、Display Optionsボタン（imageアイコン）をクリックし、Fit to screenのチェックボックスをクリックする。
+
 ---
 
 ## 3. ⚠️ TypeScript テンプレートの重要な制約
@@ -1027,7 +1051,111 @@ scene.append(scoreLabel);
 
 ---
 
-## 21. ゲームの公開
+## 21. デバッグログによるゲームテスト
+
+スクリーンショットだけでは物理演算やゲームロジックの問題を正確に把握できない。ボールの軌道が「左に曲がった」ように見えても、実際には右に曲がって手前で止まっていた、ということがある。数値データに基づく分析が圧倒的に正確で効率的。
+
+### ログ出力の設計
+
+ゲームの重要なポイントに `console.log` を仕込み、入力値・物理パラメータ・座標を出力する:
+
+```typescript
+// ユーザー入力時
+console.log("[TAP-POWER] gaugeValue=" + gaugeValue.toFixed(3));
+console.log("[TAP-ACCURACY] value=" + accuracyValue.toFixed(3) + " angle=" + (angle * 180 / Math.PI).toFixed(1) + "deg");
+
+// ショット発射時（全パラメータをまとめて出力）
+console.log("[SHOOT] power=" + power.toFixed(3) + " angle=" + angle.toFixed(3) + " vx=" + vx.toFixed(3) + " vz=" + vz.toFixed(3));
+
+// 物理更新（毎フレーム）
+console.log("[BALL] x=" + x.toFixed(2) + " z=" + z.toFixed(2) + " speed=" + speed.toFixed(4) + " distToTarget=" + dist.toFixed(2) + " surface=" + surface);
+```
+
+### ログの接頭辞ルール
+
+- `[TAP-POWER]`, `[TAP-ACCURACY]` — ユーザー入力イベント
+- `[SHOOT]`, `[FIRE]` — アクション発生時の全パラメータ
+- `[BALL]`, `[PLAYER]` — 毎フレーム物理状態
+
+接頭辞でフィルタできるので、問題分析が容易になる。
+
+### Claude Previewでのログ取得
+
+`preview_console_logs` は直近100件しか返さないため、毎フレームログがあるとユーザー入力のログが流れてしまう。全ログを確保するには `preview_eval` でキャプチャを注入する:
+
+```javascript
+// ページロード後に注入
+window.__allLogs = [];
+var origLog = console.log;
+console.log = function() {
+  var msg = Array.prototype.slice.call(arguments).join(' ');
+  window.__allLogs.push(msg);
+  origLog.apply(console, arguments);
+};
+```
+
+ログ取得時はフィルタして読む:
+```javascript
+var logs = window.__allLogs;
+var tapShoot = logs.filter(function(l) { return l.indexOf('[TAP') === 0 || l.indexOf('[SHOOT') === 0; });
+var ballFirst5 = logs.filter(function(l) { return l.indexOf('[BALL') === 0; }).slice(0, 5);
+```
+
+### ログ分析の例
+
+以下のようなデータが取れたら:
+```
+[TAP-POWER] gaugeValue=0.750 (power will be 0.375)
+[TAP-ACCURACY] value=-0.550 angle=-4.7deg
+[SHOOT] power=0.375 vx=-0.031 vz=-0.374
+[BALL] x=-0.92 z=-11.08 speed=0.005 distToHole=1.30 surface=green
+```
+
+- パワー0.375で12ユニット先のホールに1.30まで近づいた → パワーバランス適切
+- 方向ずれ-4.7度でx=-0.92 → 許容範囲
+- グリーン上で停止 → サーフェス摩擦が機能
+
+**デバッグログは開発完了後に削除すること。**
+
+---
+
+## 22. 物理パラメータのバランス調整
+
+ゲーム内の物理シミュレーション（ボール転がり、弾速、移動速度など）のバランスは、事前に数式で確認してからコードに入れると手戻りが少ない。
+
+### 摩擦による減速モデル
+
+毎フレーム速度に摩擦係数をかける場合（`speed *= friction`）、理論上の最大移動距離は等比級数の和で求まる:
+
+```
+最大移動距離 = 初速 / (1 - 摩擦係数)
+```
+
+例: パッティングゲームでの計算
+| 摩擦係数 | 初速0.5の移動距離 | 用途 |
+|---------|------------------|------|
+| 0.988 (グリーン) | 0.5 / 0.012 = 41.7 | よく転がる |
+| 0.982 (フェアウェイ) | 0.5 / 0.018 = 27.8 | 適度に減速 |
+| 0.960 (ラフ) | 0.5 / 0.040 = 12.5 | 大きく減速 |
+
+この公式で「ゲージ50%でホールに届くか」「100%で大幅オーバーするか」を事前チェックできる。
+
+### バランス設計の手順
+
+1. **目標距離を決める**: 最短ホール12ユニット、最長25ユニット
+2. **適正パワーを逆算**: ゲージ50%で最短ホールに届く → `0.5 * MAX_POWER / (1 - friction) = 12`
+3. **MAX_POWERを決定**: `MAX_POWER = 12 * (1 - friction) / 0.5`
+4. **100%パワーで検算**: 最長ホールに届くか確認
+
+### 角度パラメータの目安
+
+方向ずれの倍率は小さめにする。パッティングで最大22.9度のずれは大きすぎる（ボールがコースアウトする）。目安:
+- パッティング: 最大8〜10度（倍率 0.15程度）
+- ドライバーショット: 最大15〜20度
+
+---
+
+## 23. ゲームの公開
 
 ### HTML5出力
 ```bash
@@ -1043,7 +1171,7 @@ akashic export zip --nicolive --output game.zip
 
 ---
 
-## 22. ランキングゲームの基本テンプレート (TypeScript)
+## 24. ランキングゲームの基本テンプレート (TypeScript)
 
 **⚠️ このテンプレートはすべて `var` と `function()` で書かれている。`let`/`const`/`=>` は使わないこと。**
 
@@ -1158,6 +1286,10 @@ export function main(param: GameMainParameterObject): void {
 18. **外部ライブラリが `Math.random()` を使う場合** → `sandbox.config.js` で `"useMathRandom": false` を設定する（セクション19参照）
 19. **akashic-three使用時はES5制約は適用外** — `lib: ["ES2020", "DOM"]`、`"renderers": "webgl"`、`GPUTexture.d.ts` の設定が必要（セクション20参照）
 20. **3Dゲームのカメラは即座追従しない** — lerp（線形補間）でゆっくり追従させ、操作待ちに戻ったら速く追いつかせる
+21. **ゲームテストにはデバッグログを使う** — スクリーンショットの目視では物理演算の問題を正確に把握できない。`console.log` で数値データを出力し分析する（セクション21参照）
+22. **物理パラメータは数式で事前検証する** — `最大移動距離 = 初速 / (1 - 摩擦係数)` でバランスを確認してからコードに入れる（セクション22参照）
+23. **`akashic sandbox -B` でブラウザの自動起動を抑制** — Claude Previewで確認する場合、PCブラウザは不要。`launch.json` にも `-B` を設定する
+24. **Fit to screenはCLIオプションがない** — 毎回手動で Display Options → Fit to screen をチェックする必要がある
 
 ---
 
